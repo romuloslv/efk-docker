@@ -1,0 +1,115 @@
+version: "3.9"
+
+networks:
+  kind:
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.0.0.0/24
+
+services:
+  web:
+    image: httpd
+    hostname: web
+    container_name: web
+    domainname: lab.docker.oci
+    restart: on-failure:3
+    #healthcheck:
+    #  test: ["CMD", "curl", "-s", "-f", "web:80"]
+    #  interval: 5s
+    #  timeout: 5s
+    #  retries: 5
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: localhost:24224
+        fluentd-async-connect: "true"
+        fluentd-retry-wait: 1s
+        fluentd-max-retries: 30
+        tag: httpd.access
+    depends_on:
+      fluentd:
+        condition: service_healthy
+    ports:
+      - "80:80"
+    networks:
+      kind:
+        ipv4_address: 10.0.0.10
+
+  fluentd:
+    image: fluentd
+    hostname: fluentd
+    container_name: fluentd
+    domainname: lab.docker.oci
+    restart: on-failure:3
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./fluent.conf:/fluentd/etc/fluent.conf
+    healthcheck:
+      test: ["CMD", "nc", "-zv", "fluentd", "24224"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+    networks:
+      kind:
+        ipv4_address: 10.0.0.20
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.4.0
+    hostname: elasticsearch
+    container_name: elasticsearch
+    domainname: lab.docker.oci
+    restart: on-failure:3
+    healthcheck:
+      test: ["CMD", "curl", "-s", "-f", "elasticsearch:9200/_cat/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    ulimits: 
+      memlock:
+        soft: -1 
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    cap_add: 
+      - IPC_LOCK
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+    ports:
+      - "9200:9200"
+    networks:
+      kind:
+        ipv4_address: 10.0.0.30
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.4.0
+    hostname: kibana
+    container_name: kibana
+    domainname: lab.docker.oci
+    restart: on-failure:3
+    healthcheck:
+      test: ["CMD", "curl", "-s", "-f", "kibana:5601"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    networks:
+      kind:
+        ipv4_address: 10.0.0.40
